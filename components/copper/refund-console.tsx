@@ -98,7 +98,11 @@ export function RefundConsole({
   }
 
   async function saveLimit() {
-    const result = await actions.saveLimit(Number(limit));
+    if (!shownLimit.trim()) {
+      setMessage("Enter a number from 0 to 100000.");
+      return;
+    }
+    const result = await actions.saveLimit(Number(shownLimit));
     if (result.ok) {
       setLimitTouched(false);
       setMessage(`Auto-refund limit saved: ${formatUsd(result.limitUsd!)}.`);

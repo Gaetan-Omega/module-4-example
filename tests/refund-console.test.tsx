@@ -57,6 +57,14 @@ describe("the Refund Console", () => {
     expect(screen.getByTestId("limit-input")).toHaveValue("150");
   });
 
+  it("saving without editing the box keeps the limit instead of setting it to $0", async () => {
+    await renderSupport();
+    await screen.findByTestId("limit-input");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/limit saved: \$100/i)).toBeInTheDocument();
+    expect(screen.getByTestId("limit-input")).toHaveValue("100");
+  });
+
   it("Approve refunds the order and tells the chat of the customer whose email is in the box", async () => {
     fileRefund("ava@example.com", "ORD-1001", "Too big");
     const chat = await renderSupport();
