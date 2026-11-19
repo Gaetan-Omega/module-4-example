@@ -16,7 +16,12 @@ export type ToolStep = {
 
 export type Step = ThinkingStep | ToolStep;
 
+/** Who is answering: Copper, or the Refund specialist Copper hands refunds to. */
+export type Agent = "copper" | "refund";
+
 export type Progress = {
+  /** The agent that wrote the reply (Copper when missing). */
+  agent?: Agent;
   steps: Step[];
   reply: string;
   status: "working" | "done" | "error";
@@ -40,4 +45,32 @@ export const TOOL_LABELS: Record<string, string> = {
   calculate_cost: "Working out the cost",
   check_availability: "Checking stock",
   search_docs: "Searching the documents",
+  hand_to_refund: "Handing over to the Refund specialist",
+  get_purchase_history: "Looking up your orders",
+  get_refund_rules: "Checking the refund rules",
+  request_refund: "Filing the refund",
+  hand_to_copper: "Handing back to Copper",
+};
+
+export const AGENT_NAMES: Record<Agent, string> = {
+  copper: "Copper",
+  refund: "Refund specialist",
+};
+
+/** The tools each agent can use, for the panel's list. */
+export const AGENT_TOOLS: Record<Agent, string[]> = {
+  copper: [
+    "get_products",
+    "get_prices",
+    "calculate_cost",
+    "check_availability",
+    "search_docs",
+    "hand_to_refund",
+  ],
+  refund: [
+    "get_purchase_history",
+    "get_refund_rules",
+    "request_refund",
+    "hand_to_copper",
+  ],
 };

@@ -4,6 +4,7 @@
 // This is the only file that knows where stock is kept, so swapping the JSON
 // file for something else later means changing only readInventory().
 import data from "./data/inventory.json";
+import { store } from "@/lib/copper/refunds/store";
 
 /** One row of stock, named like the database columns it will come from. */
 export type InventoryRow = {
@@ -16,5 +17,10 @@ export type InventoryRow = {
 
 /** Every stock row, or `null` when stock can't be read right now. */
 export async function readInventory(): Promise<InventoryRow[] | null> {
-  return structuredClone(data.inventory);
+  // Units that came back with approved device refunds are on the shelf again.
+  const restocked = store().restocked;
+  return structuredClone(data.inventory).map((row) => ({
+    ...row,
+    units_in_stock: row.units_in_stock + (restocked[row.sku] ?? 0),
+  }));
 }

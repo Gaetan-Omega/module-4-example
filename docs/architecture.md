@@ -139,3 +139,36 @@ second agent, and a person approving the large ones.
 |---|---|---|
 | Page | `app/support/page.tsx` | The "Refund Console" title and nothing else yet, linked from the header as Support |
 | Chat panel | `components/copper/ask-copper.tsx` | With the `docked` prop it starts open and the page beside it stays clickable. It is the same single agent and tools as on the home page |
+
+## Module 4: Refund agent
+
+**Summary:** Copper (the shopping agent) hands a customer who wants money back
+to a separate Refund agent in the same chat. The Refund agent looks up the
+customer's orders, checks the refund rules and files a refund request. A
+refund that is eligible and **strictly under the auto-refund limit** (default
+$100) is approved automatically; one at or over it waits in the Refund Console
+for a person to Approve or Reject, and the chat tells the customer the result.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Rules | `lib/copper/refunds/rules.ts` | Plain, tested code: devices within 30 days, Copper Plus annual within 14 days, monthly never, one request per order, auto-approval below the limit. The model never decides these |
+| Store | `lib/copper/refunds/store.ts` | In-memory demo data (six customers, their orders, requests, the limit, returned stock). Resets when the server restarts; `supabase/schema.sql` and `seed.sql` hold the tables for a real database later |
+| Service | `lib/copper/refunds/service.ts` | What the tools and console do: purchase history, rules, filing, approve/reject (once only), the console state, the limit |
+| Refund agent | `lib/copper/refunds/tools.ts`, `instructions.ts` | Tools `get_purchase_history`, `get_refund_rules`, `request_refund`, `hand_to_copper`. The customer's email is fixed by the server, so the model can't read other customers' orders. `request_refund` re-checks the rules itself |
+| Handoff | `lib/copper/assistant/ask.ts` | One conversation. `hand_to_refund` / `hand_to_copper` end an agent's turn, the other agent continues in the same answer (at most 2 handoffs) and only its words are kept |
+| Restocking | `lib/copper/refunds/availability.ts` | `update_availability` adds one unit back after a **device** refund is approved. Code runs it, never the model |
+| Console | `app/support/page.tsx`, `components/copper/refund-console.tsx` | The open Refund Console (limit, waiting, decided, all orders), refreshed every 3 seconds, with the chat docked beside it |
+| Admin | `app/admin/`, `lib/copper/refunds/admin-auth.ts` | The same console behind one password (`ADMIN_PASSWORD`, signed httpOnly cookie using `ADMIN_SESSION_SECRET`), plus the rule, the agent's recommendation, a note box and stock |
+| Chat panel | `components/copper/ask-copper.tsx` | An order-email box, a badge for who is answering, each agent's tool list, tool cards for the refund tools and messages from the console |
+
+Data flow: customer → Copper → `hand_to_refund` → Refund agent →
+`get_purchase_history` → `get_refund_rules` → `request_refund` → auto-approved
+(stock +1 for a device) or pending → Refund Console → Approve / Reject →
+window event → notice in the chat.
+
+Limits: `/support` is open on purpose for the class demo, so anyone with the
+link can approve; put it behind the admin password before any real use. The
+refund payout is simulated. The in-memory store is per server instance, so on
+Vercel it is not shared between instances and resets on restart. The default
+model is Gemini 3.1 Flash-Lite, and its price in `lib/ai/pricing.ts` is an
+estimate.

@@ -5,6 +5,9 @@ import type { ModelId } from "@/lib/ai/models";
 export const PRICING: Record<ModelId, { input: number; output: number }> = {
   "google/gemini-2.5-flash": { input: 0.3, output: 2.5 },
   "google/gemini-3-flash": { input: 0.5, output: 3 },
+  // ESTIMATE: 3.1 Flash-Lite wasn't on Google's pricing page when this was
+  // added, so this uses the price listed for 3.5 Flash-Lite (2026-11).
+  "google/gemini-3.1-flash-lite": { input: 0.3, output: 2.5 },
 };
 
 export function costUsd(

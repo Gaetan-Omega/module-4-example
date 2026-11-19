@@ -12,15 +12,22 @@ export const MODELS = [
     label: "Gemini 3 Flash (newer, thinks out loud less often)",
     googleId: "gemini-3-flash-preview",
   },
+  {
+    id: "google/gemini-3.1-flash-lite",
+    label: "Gemini 3.1 Flash-Lite (fast and light, works on a free key)",
+    googleId: "gemini-3.1-flash-lite",
+  },
 ] as const;
 
 export type ModelId = (typeof MODELS)[number]["id"];
 
 /**
- * The model used when a call doesn't name one. 2.5 Flash writes a summary of
- * its thinking for every question, which Ask Copper shows students.
+ * The model used when a call doesn't name one. Google no longer lets new API
+ * keys use 2.5 Flash, so the default is 3.1 Flash-Lite (free, and steadier on
+ * a free key than the 3 Flash preview). The newer models write fewer thinking
+ * summaries than 2.5 Flash did.
  */
-export const DEFAULT_MODEL: ModelId = "google/gemini-2.5-flash";
+export const DEFAULT_MODEL: ModelId = "google/gemini-3.1-flash-lite";
 
 /**
  * Turns text into a list of numbers so similar meanings can be found (Module 3).

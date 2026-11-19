@@ -15,6 +15,7 @@ import {
 import { DOCUMENTS, pageUrl } from "@/lib/copper/documents";
 import { readInventory } from "@/lib/copper/inventory";
 import { PASSAGES } from "@/lib/copper/passages";
+import { handToRefund } from "@/lib/copper/refunds/tools";
 
 export type ProductList = {
   products: {
@@ -270,4 +271,5 @@ export const copperTools = {
     }),
     execute: async ({ query }) => searchDocs(query),
   }),
+  hand_to_refund: handToRefund,
 };

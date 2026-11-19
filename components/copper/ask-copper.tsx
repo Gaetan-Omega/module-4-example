@@ -30,11 +30,19 @@ import { readLive } from "@/lib/ai/live";
 import { askCopper, type ChatMessage } from "@/lib/copper/assistant/ask";
 import { splitCitations } from "@/lib/copper/assistant/citations";
 import {
+  AGENT_NAMES,
+  AGENT_TOOLS,
+  type Agent,
   type Progress,
   type ToolStep,
   TOOL_LABELS,
 } from "@/lib/copper/assistant/progress";
 import { formatUsd, getPlans, getProducts } from "@/lib/copper/catalog";
+import {
+  DECISION_EVENT,
+  DEMO_EMAILS,
+  type DecisionNotice,
+} from "@/lib/copper/refunds/types";
 import { cn } from "@/lib/utils";
 
 const STARTERS = [
@@ -43,7 +51,8 @@ const STARTERS = [
   "Is Copper Plus cheaper monthly or yearly?",
 ];
 
-type Turn = { question: string; progress: Progress };
+/** A `notice` is a message from the Refund Console, not a question; it never goes to the model. */
+type Turn = { question: string; progress: Progress; notice?: boolean };
 type Chats = { tools: Turn[]; noTools: Turn[] };
 
 const WORKING: Progress = { steps: [], reply: "", status: "working" };
@@ -60,7 +69,14 @@ export function AskCopper({
   const [useTools, setUseTools] = useState(true);
   const [chats, setChats] = useState<Chats>({ tools: [], noTools: [] });
   const [draft, setDraft] = useState("");
+  // The customer's email (demo: they type it) and who answered last.
+  const [email, setEmail] = useState("");
+  const [agent, setAgent] = useState<Agent>("copper");
   const body = useRef<HTMLDivElement>(null);
+  const emailNow = useRef("");
+  useEffect(() => {
+    emailNow.current = email.trim().toLowerCase();
+  }, [email]);
 
   const key = useTools ? "tools" : "noTools";
   const turns = chats[key];
@@ -82,6 +98,33 @@ export function AskCopper({
     };
   }, []);
 
+  // The Refund Console says a refund was approved or rejected: tell the
+  // customer whose email is in the box.
+  useEffect(() => {
+    const onDecision = (event: Event) => {
+      const notice = (event as CustomEvent<DecisionNotice>).detail;
+      if (!notice || notice.customerEmail !== emailNow.current) return;
+      setChats((all) => ({
+        ...all,
+        tools: [
+          ...all.tools,
+          {
+            question: "",
+            notice: true,
+            progress: {
+              agent: "refund",
+              steps: [],
+              reply: notice.message,
+              status: "done",
+            },
+          },
+        ],
+      }));
+    };
+    window.addEventListener(DECISION_EVENT, onDecision);
+    return () => window.removeEventListener(DECISION_EVENT, onDecision);
+  }, []);
+
   useEffect(() => {
     if (body.current) body.current.scrollTop = body.current.scrollHeight;
   }, [chats, useTools]);
@@ -92,12 +135,15 @@ export function AskCopper({
     setDraft("");
     const chat = key;
     const index = turns.length;
+    const asking = agent;
     // Only finished turns go to the model: questions and Copper's replies.
     const messages: ChatMessage[] = [
-      ...turns.flatMap(({ question, progress }): ChatMessage[] => [
-        { role: "user", content: question },
-        { role: "assistant", content: progress.reply },
-      ]),
+      ...turns
+        .filter((turn) => !turn.notice)
+        .flatMap(({ question, progress }): ChatMessage[] => [
+          { role: "user", content: question },
+          { role: "assistant", content: progress.reply },
+        ]),
       { role: "user", content: question },
     ];
     const setProgress = (progress: Progress) =>
@@ -112,11 +158,17 @@ export function AskCopper({
       [chat]: [...all[chat], { question, progress: WORKING }],
     }));
     try {
+      // Say who is answering and the email only when there is something to say.
       const { progress } = await askCopper({
         messages,
         useTools: chat === "tools",
+        ...(asking !== "copper" && { agent: asking }),
+        ...(email.trim() && { email }),
       });
-      for await (const update of readLive(progress)) setProgress(update);
+      for await (const update of readLive(progress)) {
+        setProgress(update);
+        if (update.agent) setAgent(update.agent);
+      }
     } catch {
       setProgress({
         steps: [],
@@ -194,14 +246,18 @@ export function AskCopper({
                 ref={body}
                 className="bg-secondary flex-1 space-y-6 overflow-y-auto px-4 py-5"
               >
-                {turns.map((turn, i) => (
-                  <div key={i} className="space-y-4">
-                    <p className="bg-primary text-primary-foreground ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2">
-                      {turn.question}
-                    </p>
-                    <Answer progress={turn.progress} useTools={useTools} />
-                  </div>
-                ))}
+                {turns.map((turn, i) =>
+                  turn.notice ? (
+                    <Notice key={i} text={turn.progress.reply} />
+                  ) : (
+                    <div key={i} className="space-y-4">
+                      <p className="bg-primary text-primary-foreground ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2">
+                        {turn.question}
+                      </p>
+                      <Answer progress={turn.progress} useTools={useTools} />
+                    </div>
+                  ),
+                )}
                 {!busy && (
                   <div className="space-y-2">
                     {turns.length === 0 && (
@@ -230,6 +286,20 @@ export function AskCopper({
                 }}
                 className="bg-background flex items-center gap-2 border-t p-3"
               >
+                <input
+                  aria-label="Your order email"
+                  type="email"
+                  list="copper-demo-emails"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Your order email"
+                  className="bg-background focus-visible:ring-ring h-10 w-36 shrink-0 rounded-full border px-3 text-xs outline-none focus-visible:ring-2"
+                />
+                <datalist id="copper-demo-emails">
+                  {DEMO_EMAILS.map((demo) => (
+                    <option key={demo} value={demo} />
+                  ))}
+                </datalist>
                 <input
                   aria-label="Your question"
                   value={draft}
@@ -268,6 +338,8 @@ function Answer({
   useTools: boolean;
 }) {
   const { steps, reply, status } = progress;
+  const agent = progress.agent ?? "copper";
+  const tools = useTools ? AGENT_TOOLS[agent] : AGENT_TOOLS.copper;
   const used = new Set(
     steps.filter((s): s is ToolStep => s.type === "tool").map((s) => s.name),
   );
@@ -289,11 +361,15 @@ function Answer({
           node={<WrenchIcon className="size-3" />}
           nodeClass="bg-muted-foreground"
           label={
-            useTools ? "Tools Copper can use" : "Tools given to Copper: none"
+            !useTools
+              ? "Tools given to Copper: none"
+              : agent === "refund"
+                ? "Tools the Refund specialist can use"
+                : "Tools Copper can use"
           }
         >
           <div className="flex flex-wrap gap-1.5">
-            {Object.keys(TOOL_LABELS).map((name) => (
+            {tools.map((name) => (
               <span
                 key={name}
                 className={cn(
@@ -376,7 +452,12 @@ function Answer({
 
       {(reply || !working) && (
         <div className="bg-card ml-2 rounded-2xl rounded-tl-sm border p-4 shadow-xs">
-          <p className="text-primary mb-1 text-xs font-bold">Copper</p>
+          <p
+            data-testid="agent-badge"
+            className="text-primary mb-1 text-xs font-bold"
+          >
+            {useTools ? AGENT_NAMES[agent] : "Copper"}
+          </p>
           {!useTools && (
             <div className="border-chart-3 bg-chart-3/10 mb-3 rounded-lg border p-3 text-xs">
               <p className="flex items-center gap-1.5 font-bold">
@@ -399,6 +480,21 @@ function Answer({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A message from the Refund Console (approved or rejected), shown as the Refund specialist. */
+function Notice({ text }: { text: string }) {
+  return (
+    <div
+      data-testid="refund-notice"
+      className="bg-card ml-2 rounded-2xl rounded-tl-sm border p-4 shadow-xs"
+    >
+      <p className="text-primary mb-1 text-xs font-bold">
+        {AGENT_NAMES.refund}
+      </p>
+      <p className="text-sm">{text}</p>
     </div>
   );
 }
@@ -527,6 +623,7 @@ const nameOf = (value: unknown) =>
     : (NAMES[String(value)] ?? String(value));
 
 const NO_INPUT: Record<string, string> = {
+  get_purchase_history: "Nothing, it just asked for this customer's orders",
   get_prices: "Nothing, it just asked for the price list",
   get_products: "Nothing, it just asked what Copper sells",
 };
@@ -612,6 +709,83 @@ function ToolOutput({ name, output }: { name: string; output: any }) {
           ))}
       </div>
     );
+  if (name.startsWith("hand_to_") && output?.handoff)
+    return (
+      <p className="text-xs">
+        Passing the chat to{" "}
+        <strong>
+          {output.handoff === "refund" ? AGENT_NAMES.refund : "Copper"}
+        </strong>
+        : {output.summary}
+      </p>
+    );
+  if (name === "get_purchase_history" && output?.status) {
+    if (output.status === "need_email")
+      return <p className="text-xs">No email yet, so no orders to look up.</p>;
+    return (
+      <div className="space-y-1 text-xs">
+        {output.orders.length === 0 && <p>No orders found.</p>}
+        {output.orders.map((o: any) => (
+          <div key={o.id} className="flex justify-between gap-2">
+            <span>
+              <span className="font-mono">{o.id}</span> {o.item},{" "}
+              {o.daysSincePurchase} days ago
+              {o.refundStatus !== "none" && ` (refund ${o.refundStatus})`}
+            </span>
+            <span className="font-mono">{formatUsd(o.amountUsd)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (name === "get_refund_rules" && output?.status) {
+    if (output.status !== "ok")
+      return (
+        <p className="text-xs">
+          {output.status === "need_email"
+            ? "No email yet."
+            : "That order isn't on this account."}
+        </p>
+      );
+    return (
+      <div className="space-y-1 text-xs">
+        <p className="font-semibold">
+          {output.eligible ? "Eligible" : "Not eligible"}
+          {output.eligible && ", refund " + formatUsd(output.refundUsd)}
+        </p>
+        <p>{output.reason}</p>
+        <p className="text-muted-foreground">Rule: {output.rule}</p>
+        {output.eligible && (
+          <p className="text-muted-foreground">
+            {output.autoApproved
+              ? `Under the ${formatUsd(output.autoRefundLimitUsd)} limit, no admin needed`
+              : `At or over the ${formatUsd(output.autoRefundLimitUsd)} limit, an admin must approve`}
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (name === "request_refund" && output?.status) {
+    if (output.status === "auto_approved")
+      return (
+        <p className="text-xs">
+          <strong>{output.requestId} approved automatically</strong>:{" "}
+          {formatUsd(output.refundUsd)}. {output.note}.
+        </p>
+      );
+    if (output.status === "created")
+      return (
+        <p className="text-xs">
+          <strong>{output.requestId} is pending admin review</strong>:{" "}
+          {formatUsd(output.refundUsd)}. A Copper admin must approve it.
+        </p>
+      );
+    if (output.status === "not_eligible")
+      return (
+        <p className="text-xs">Not eligible, nothing filed. {output.reason}</p>
+      );
+    return <p className="text-xs">Couldn&apos;t file it: {output.status}.</p>;
+  }
   if (name === "check_availability" && output?.status) {
     if (output.status === "unavailable")
       return <p className="text-xs">{output.message}</p>;
